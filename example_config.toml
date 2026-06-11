@@ -1,0 +1,29 @@
+username = "user"
+password = "pass"
+
+github_PAT = "token"
+
+[hosts]
+yahor_host1 = { ip = "100.100.2.1", vms = {
+    "yahor_host1_vm1" = "100.100.2.2",
+    "yahor_host1_vm2" = "100.100.2.3",
+    "yahor_host1_vm3" = "100.100.2.4",
+    "yahor_host1_vm4" = "100.100.2.5",
+    "yahor_host1_vm5" = "100.100.2.6",
+    "yahor_host1_vm6" = "100.100.2.7",
+    "yahor_host1_vm7" = "100.100.2.8",
+    "yahor_host1_vm8" = "100.100.2.9",
+    "yahor_host1_vm9" = "100.100.2.10",
+    "yahor_host1_vm10" = "100.100.2.11",
+    "yahor_host1_vm11" = "100.100.2.12",
+    "yahor_host1_vm12" = "100.100.2.13",
+    "yahor_host1_vm13" = "100.100.2.14",
+    "yahor_host1_vm14" = "100.100.2.15",
+    "yahor_host1_vm15" = "100.100.2.16",
+    "yahor_host1_vm16" = "100.100.2.17",
+    "yahor_host1_vm17" = "100.100.2.18",
+    "yahor_host1_vm18" = "100.100.2.19",
+    "yahor_host1_vm19" = "100.100.2.20",
+    "yahor_host1_vm20" = "100.100.2.21"
+  }
+}
