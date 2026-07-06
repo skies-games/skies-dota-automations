@@ -132,10 +132,10 @@ fn parse_range(range: &str) -> Vec<u16> {
 
 fn check_git_for_updates() -> bool{
     let local_commit_hash_output = Command::new("git")
-    .args(&["rev-parse", "bot-automations", "main"])
+    .args(&["rev-parse", "HEAD"])
     .output()
-    .expect("Failed to execute: git rev-parse bot-automations main");
-    assert!(local_commit_hash_output.status.success(), "Failed to execute: git rev-parse bot-automations main: {}", &local_commit_hash_output.status);
+    .expect("Failed to execute: git rev-parse HEAD");
+    assert!(local_commit_hash_output.status.success(), "Failed to execute: git rev-parse HEAD: {}", &local_commit_hash_output.status);
     let local_commit_hash = String::from_utf8(local_commit_hash_output.stdout).expect("Failed to convert stdout to string")
                             .split_whitespace()
                             .next().expect("Failed to get local commit hash")
@@ -143,10 +143,10 @@ fn check_git_for_updates() -> bool{
     println!("local_commit_hash: {}", local_commit_hash);
 
     let remote_commit_hash_output = Command::new("git")
-    .args(&["ls-remote", "bot-automations", "-h", "refs/heads/main"])
+    .args(&["ls-remote", "origin", "-h", "refs/heads/main"])
     .output()
-    .expect("Failed to execute: git ls-remote bot-automations -h refs/heads/main");
-    assert!(remote_commit_hash_output.status.success(), "Failed to execute: git ls-remote bot-automations -h refs/heads/main: {}", &remote_commit_hash_output.status);
+    .expect("Failed to execute: git ls-remote origin -h refs/heads/main");
+    assert!(remote_commit_hash_output.status.success(), "Failed to execute: git ls-remote origin -h refs/heads/main: {}", &remote_commit_hash_output.status);
     let remote_commit_hash = String::from_utf8(remote_commit_hash_output.stdout).expect("Failed to convert stdout to string")
                             .split_whitespace()
                             .next().expect("Failed to get remote commit hash")
