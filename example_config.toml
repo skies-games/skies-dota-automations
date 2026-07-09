@@ -1,8 +1,6 @@
 username = "user"
 password = "pass"
 
-github_PAT = "token"
-
 [hosts]
 yahor_host1 = { ip = "100.100.2.1", vms = {
     "yahor_host1_vm1" = "100.100.2.2",

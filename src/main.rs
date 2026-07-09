@@ -5,20 +5,22 @@ use std::io::{self, Write};
 use std::collections::BTreeMap;
 use std::process::{exit, Command};
 
+use automations::config;
+use automations::logger;
+
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
 #[derive(Debug, Deserialize)]
-struct Config {
+struct AutomationsConfig {
     username: String,
     password: String,
-    github_pat: String,
     hosts: BTreeMap<String, Host>
 }
 
 #[derive(Debug, Deserialize)]
 struct Host {
-    ip: String,
+    _ip: String,
     vms: BTreeMap<String, String>
 }
 
@@ -53,19 +55,21 @@ enum ArgKind {
 
 #[tokio::main]
 async fn main() {
-    let config: Arc<Config> = Arc::new(
+    let app_config = config::Config::build();
+    let _otel_guard = logger::init(&app_config);
+    let automations_config: Arc<AutomationsConfig> = Arc::new(
         toml::from_str(&fs::read_to_string("config.toml").expect("Failed to read config.toml")).expect("Failed to parse TOML")
     );
     let args: Arc<Args> = Arc::new(parse_args());
-    println!("args: {:?}", args);
+    tracing::info!("args: {:?}", args);
     let update_needed = check_git_for_updates();
     let remote_command = Arc::new(get_remote_command(args.automation_name.as_str()));
     let sshpass_args: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let mut sshpass_args_guard = sshpass_args.lock().await;
-    sshpass_args_guard.push(format!("-p{}", config.password));
+    sshpass_args_guard.push(format!("-p{}", automations_config.password));
     sshpass_args_guard.push(String::from("ssh"));
     drop(sshpass_args_guard);
-    run_automation(config, args, sshpass_args, remote_command, update_needed).await;
+    run_automation(automations_config, args, sshpass_args, remote_command, update_needed).await;
 }
 
 fn parse_args() -> Args {
@@ -85,7 +89,7 @@ fn parse_args() -> Args {
     let args_len = args.len();
 
     if args_len < 2 {
-        println!("Usage: {} <automation_name>", args[0]);
+        tracing::error!("Usage: {} <automation_name>", args[0]);
         exit(1);
     }
 
@@ -111,7 +115,7 @@ fn parse_args() -> Args {
             }
         }
         else {
-            println!("Invalid argument: {}", args[i]);
+            tracing::error!("Invalid argument: {}", args[i]);
             exit(1);
         }
     }
@@ -140,7 +144,7 @@ fn check_git_for_updates() -> bool{
                             .split_whitespace()
                             .next().expect("Failed to get local commit hash")
                             .to_string();
-    println!("local_commit_hash: {}", local_commit_hash);
+    tracing::info!("local_commit_hash: {}", local_commit_hash);
 
     let remote_commit_hash_output = Command::new("git")
     .args(&["ls-remote", "origin", "-h", "refs/heads/main"])
@@ -151,7 +155,7 @@ fn check_git_for_updates() -> bool{
                             .split_whitespace()
                             .next().expect("Failed to get remote commit hash")
                             .to_string();
-    println!("remote_commit_hash: {}", remote_commit_hash);
+    tracing::info!("remote_commit_hash: {}", remote_commit_hash);
 
     local_commit_hash != remote_commit_hash
 }
@@ -162,14 +166,14 @@ fn get_remote_command(command: &str) -> String {
         "shutdown_dota" => String::from("\"C:\\Users\\%USERNAME%\\Desktop\\skies-dota-bot-automations\\dota_shutdown.bat\""),
         "cancel_game_search" => String::from("cd C:\\Users\\%USERNAME%\\Desktop\\skies-dota-bot-automations && \"venv/Scripts/activate.bat\" && python cancel_game_search.py"),
         _ => {
-            println!("The remote command \"{}\" not found", command);
+            tracing::error!(%command, "The remote command not found");
             exit(1);
         },
     }
 }
 
 async fn run_automation(
-    config: Arc<Config>, 
+    automations_config: Arc<AutomationsConfig>, 
     args: Arc<Args>, 
     sshpass_args: Arc<Mutex<Vec<String>>>, 
     remote_command: Arc<String>, 
@@ -178,24 +182,24 @@ async fn run_automation(
     let (hosts_start_range, hosts_end_range) = (args.selected_hosts.first(), args.selected_hosts.last());
     let (bots_start_range, bots_end_range) = (args.selected_bots.first(), args.selected_bots.last());
 
-    for (name, host) in config.hosts.iter() {
+    for (name, host) in automations_config.hosts.iter() {
         if !args.host_owner_name.is_empty() && !name.contains(&args.host_owner_name) {
-            println!("Skipping host: {}", name);
+            tracing::info!(%name, "Skipping host");
             continue;
         }
 
         if let (Some(hosts_start_range), Some(hosts_end_range)) = (hosts_start_range, hosts_end_range) {
             let host_number = parse_host_number(name);
             if host_number < *hosts_start_range || host_number > *hosts_end_range {
-                println!("Skipping host: {} (not in selected range)", name);
+                tracing::info!(%name, "Skipping host (not in selected range)");
                 continue;
             }
         }
         
         if let (Some(bots_start_range), Some(bots_end_range)) = (bots_start_range, bots_end_range) {
-            println!("Running host: {}", name);
+            tracing::info!(%name, "Running host");
             run_automation_on_bots(
-                Arc::clone(&config), 
+                Arc::clone(&automations_config), 
                 Arc::clone(&sshpass_args), 
                 Arc::clone(&remote_command), 
                 host,
@@ -205,9 +209,9 @@ async fn run_automation(
             ).await;
         }
         else {
-            println!("Running host: {}", name);
+            tracing::info!(%name, "Running host");
             run_automation_on_bots(
-                Arc::clone(&config), 
+                Arc::clone(&automations_config), 
                 Arc::clone(&sshpass_args), 
                 Arc::clone(&remote_command), 
                 host, 
@@ -228,7 +232,7 @@ fn parse_host_number(host_name: &str) -> u16 {
 }
 
 async fn run_automation_on_bots(
-    config: Arc<Config>, 
+    automations_config: Arc<AutomationsConfig>, 
     sshpass_args: Arc<Mutex<Vec<String>>>, 
     remote_command: Arc<String>, 
     host: &Host, 
@@ -236,23 +240,23 @@ async fn run_automation_on_bots(
     bots_start_range: u16, 
     bots_end_range: u16
 ) {
-    println!("Running automation on bots from range: {} to {}", bots_start_range, bots_end_range);
+    tracing::info!("Running automation on bots from range: {} to {}", &bots_start_range, &bots_end_range);
     let mut bot_number = 1;
     let mut ssh_sessions = Vec::new();
     for (name, ip) in host.vms.iter() {
-        println!("checking bot number: {}", bot_number);
+        tracing::info!(%bot_number, "Checking bot number");
         if !(bot_number >= bots_start_range && bot_number <= bots_end_range) {
-            println!("Skipping bot: {} (not in selected range)", name);
+            tracing::info!(%name, "Skipping bot (not in selected range)");
             continue;
         }
         else {
-            let config = Arc::clone(&config);
+            let automations_config = Arc::clone(&automations_config);
             let sshpass_args = Arc::clone(&sshpass_args);
             let remote_command = Arc::clone(&remote_command);
             let ip = ip.clone();
             let name = name.clone();
             let ssh_session = tokio::spawn(async move {
-                execute_ssh_command(config, sshpass_args, remote_command, update_needed, &name, &ip).await;
+                execute_ssh_command(automations_config, sshpass_args, remote_command, update_needed, &name, &ip).await;
             });
             ssh_sessions.push(ssh_session);
         }
@@ -264,7 +268,7 @@ async fn run_automation_on_bots(
 }
 
 async fn execute_ssh_command(
-    config: Arc<Config>, 
+    automations_config: Arc<AutomationsConfig>, 
     sshpass_args: Arc<Mutex<Vec<String>>>, 
     remote_command: Arc<String>, 
     update_needed: bool, 
@@ -272,20 +276,20 @@ async fn execute_ssh_command(
     ip: &str
 ) {
     let mut sshpass_args_guard = sshpass_args.lock().await;
-    if let Some(arg) = sshpass_args_guard.get(2) {
-        sshpass_args_guard[2] = format!("{}@{}", config.username, ip);
+    if let Some(_arg) = sshpass_args_guard.get(2) {
+        sshpass_args_guard[2] = format!("{}@{}", automations_config.username, ip);
         sshpass_args_guard[3] = get_final_command(update_needed, &*remote_command);
     }
     else {
-        sshpass_args_guard.push(format!("{}@{}", config.username, ip));
+        sshpass_args_guard.push(format!("{}@{}", automations_config.username, ip));
         sshpass_args_guard.push(get_final_command(update_needed, &*remote_command));
     }
 
     let output = Command::new("sshpass")
     .args(&*sshpass_args_guard)
     .output()
-    .expect("ssh command failed to start");
-    println!("\nDONE: VM: {}, IP: {}, {}", name, ip, output.status);
+    .expect("Failed to execute ssh command");
+    tracing::info!(%name, %ip, "DONE: {}", output.status);
     io::stdout().write_all(&output.stdout).expect("Failed to write stdout to console");
     io::stderr().write_all(&output.stderr).expect("Failed to write stderr to console");
 }
