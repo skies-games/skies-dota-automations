@@ -6,6 +6,8 @@ pub struct Config {
 	pub app_name: String,
 	pub app_version: String,
 	pub deployment_env: String,
+	pub coordinator_server_ip: String,
+	pub coordinator_server_port: u16,
 	pub openobserve_endpoint: String,
 	pub openobserve_credentials: String,
 	pub openobserve_organization: String,
@@ -23,6 +25,12 @@ impl Config {
 			deployment_env: "dev".to_string(),
 			openobserve_organization: "default".to_string(),
 			openobserve_stream_name: "skiesdota-automations".to_string(),
+			coordinator_server_ip: env::var("COORDINATOR_SERVER_IP")
+				.expect("COORDINATOR_SERVER_IP is not set"),
+			coordinator_server_port: env::var("COORDINATOR_SERVER_PORT")
+				.expect("COORDINATOR_SERVER_PORT is not set")
+				.parse()
+				.expect("COORDINATOR_SERVER_PORT must be a valid u16"),
 			openobserve_endpoint: env::var("OPENOBSERVE_ENDPOINT")
 				.expect("OPENOBSERVE_ENDPOINT is not set"),
 			openobserve_credentials: env::var("OPENOBSERVE_CREDENTIALS")
