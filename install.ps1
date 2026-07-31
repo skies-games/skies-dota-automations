@@ -1,0 +1,1 @@
+winget install xhcoding.sshpass-win32

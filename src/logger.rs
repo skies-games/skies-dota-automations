@@ -63,9 +63,9 @@ pub fn init(config: &Config) -> OtelGuard {
 
 	let otel_layer = OpenTelemetryTracingBridge::new(&provider);
 	let filter = if config.debug {
-		EnvFilter::new("warn,coordinator=debug")
+		EnvFilter::new("warn,automations=debug")
 	} else {
-		EnvFilter::new("warn,coordinator=info")
+		EnvFilter::new("warn,automations=info")
 	};
 
 

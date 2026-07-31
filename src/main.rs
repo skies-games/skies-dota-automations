@@ -3,15 +3,18 @@ use std::env::args;
 use std::sync::Arc;
 use std::io::{self, Write};
 use std::collections::BTreeMap;
-use std::process::{exit, Command};
+use std::process::exit;
 
 use automations::config;
 use automations::logger;
 
 use serde::Deserialize;
-use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
+use tokio::process::Command;
+use tokio::io::AsyncWriteExt;
+
+const SKIES_DOTA_BOT_AUTOMATIONS_PATH: &str = "C:\\Users\\%USERNAME%\\Desktop\\skies-dota-bot-automations";
+const SKIES_DOTA_PATH: &str = "C:\\Users\\%USERNAME%\\Desktop\\skies-dota";
 
 #[derive(Debug, Deserialize)]
 struct AutomationsConfig {
@@ -53,19 +56,14 @@ async fn main() {
     let args: Arc<Args> = Arc::new(parse_args());
     tracing::info!("args: {:?}", args);
 
-    if args.automation_name == "stop_script" {
+    if args.automation_name == "stop" {
         run_stop_script(&app_config, &automations_config, &args).await;
         return;
     }
 
     let update_needed = check_git_for_updates();
     let remote_command = Arc::new(get_remote_command(args.automation_name.as_str()));
-    let sshpass_args: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let mut sshpass_args_guard = sshpass_args.lock().await;
-    sshpass_args_guard.push(format!("-p{}", automations_config.password));
-    sshpass_args_guard.push(String::from("ssh"));
-    drop(sshpass_args_guard);
-    run_automation(automations_config, args, sshpass_args, remote_command, update_needed).await;
+    run_automation(automations_config, args, remote_command, update_needed, app_config.debug).await;
 }
 
 fn parse_args() -> Args {
@@ -74,20 +72,31 @@ fn parse_args() -> Args {
         ("--automation", ArgKind::AutomationName),
         ("-b", ArgKind::SelectedBots),
         ("--bots", ArgKind::SelectedBots),
-        ("-d", ArgKind::AdditionalDataPath),
         ("--data", ArgKind::AdditionalDataPath),
     ]);
     let args: Vec<String> = args().collect();
     let args_len = args.len();
 
     if args_len < 2 {
-        tracing::error!("Usage: {} -a <automation_name> [-b <bot_range>]", args[0]);
+        tracing::error!("Usage: {} -a <automation_name> [-b <bot_range>] [-d|--debug]", args[0]);
         exit(1);
     }
 
     let mut args_struct: Args = Args::new();
-    for i in (1..args_len).step_by(2) {
-        if let Some(arg) = args_map.get(args[i].as_str()) {
+    // args[0] is the binary; flags start at args[1] (e.g. -a dota_launch)
+    // -d/--debug is a boolean (consumed by Config::build); skip it here
+    let mut i = 1;
+    while i < args_len {
+        let flag = args[i].as_str();
+        if flag == "-d" || flag == "--debug" {
+            i += 1;
+            continue;
+        }
+        if let Some(arg) = args_map.get(flag) {
+            if i + 1 >= args_len {
+                tracing::error!("Missing value for argument: {}", flag);
+                exit(1);
+            }
             match arg {
                 ArgKind::AutomationName => {
                     args_struct.automation_name = args[i + 1].clone();
@@ -99,9 +108,9 @@ fn parse_args() -> Args {
                     args_struct.additional_data_path = Some(args[i + 1].clone());
                 }
             }
-        }
-        else {
-            tracing::error!("Invalid argument: {}", args[i]);
+            i += 2;
+        } else {
+            tracing::error!("Invalid argument: {}", flag);
             exit(1);
         }
     }
@@ -120,8 +129,11 @@ fn parse_range(range: &str) -> Vec<u16> {
     }
 }
 
-fn check_git_for_updates() -> bool{
-    let local_commit_hash_output = Command::new("git")
+fn check_git_for_updates() -> bool {
+    true
+    // temporary disable git check for updates
+    /*
+    let local_commit_hash_output = std::process::Command::new("git")
     .args(&["rev-parse", "HEAD"])
     .output()
     .expect("Failed to execute: git rev-parse HEAD");
@@ -132,7 +144,7 @@ fn check_git_for_updates() -> bool{
                             .to_string();
     tracing::info!("local_commit_hash: {}", local_commit_hash);
 
-    let remote_commit_hash_output = Command::new("git")
+    let remote_commit_hash_output = std::process::Command::new("git")
     .args(&["ls-remote", "origin", "-h", "refs/heads/main"])
     .output()
     .expect("Failed to execute: git ls-remote origin -h refs/heads/main");
@@ -144,15 +156,45 @@ fn check_git_for_updates() -> bool{
     tracing::info!("remote_commit_hash: {}", remote_commit_hash);
 
     local_commit_hash != remote_commit_hash
+    */
+}
+
+/// PsExec -d returns the child PID as its exit code on success. Normalize to 0/1 via the "started" line.
+fn psexec_detach(psexec_cmd: &str) -> String {
+    format!(
+        "({psexec_cmd} >%TEMP%\\psexec_out.txt 2>&1 & type %TEMP%\\psexec_out.txt & findstr /I /C:\"started\" %TEMP%\\psexec_out.txt >nul)"
+    )
 }
 
 fn get_remote_command(command: &str) -> String {
     match command {
-        "start" => String::from("cd C:\\Users\\%USERNAME%\\Desktop\\skies-dota && \"venv/Scripts/activate.bat\" && python src/main.py"),
-        "dota_launch" => String::from("\"C:\\Users\\%USERNAME%\\Desktop\\skies-dota-bot-automations\\dota_launch.bat\""),
-        "dota_shutdown" => String::from("\"C:\\Users\\%USERNAME%\\Desktop\\skies-dota-bot-automations\\dota_shutdown.bat\""),
-        "cancel_game_search" => String::from("cd C:\\Users\\%USERNAME%\\Desktop\\skies-dota-bot-automations && \"venv/Scripts/activate.bat\" && python cancel_game_search.py"),
-        "disconnect" => String::from("cd C:\\Users\\%USERNAME%\\Desktop\\skies-dota-bot-automations && \"venv/Scripts/activate.bat\" && python disconnect.py"),
+        "start" => psexec_detach(&format!(
+            "PsExec.exe -s -d -i 1 -h -w {} -nobanner -accepteula {}\\Scripts\\python.exe {}\\src\\main.py --debug",
+            SKIES_DOTA_PATH, SKIES_DOTA_PATH, SKIES_DOTA_PATH
+        )),
+        "dota_launch" => format!(
+            "cd {} && Scripts\\pythonw.exe SetUpItems\\set_up_items.py && {}",
+            SKIES_DOTA_BOT_AUTOMATIONS_PATH,
+            psexec_detach(&format!(
+                "PsExec.exe -s -d -i 1 -h -nobanner -accepteula {}\\dota_launch.bat",
+                SKIES_DOTA_BOT_AUTOMATIONS_PATH
+            ))
+        ),
+        "dota_shutdown" => format!("{}\\dota_shutdown.bat", SKIES_DOTA_BOT_AUTOMATIONS_PATH),
+        "cancel_game_search" => psexec_detach(&format!(
+            "PsExec.exe -s -d -i 1 -h -w {} -nobanner -accepteula {}\\Scripts\\pythonw.exe {}\\cancel_game_search.py",
+            SKIES_DOTA_BOT_AUTOMATIONS_PATH, SKIES_DOTA_BOT_AUTOMATIONS_PATH, SKIES_DOTA_BOT_AUTOMATIONS_PATH
+        )),
+        "disconnect" => psexec_detach(&format!(
+            "PsExec.exe -s -d -i 1 -h -nobanner -accepteula {}\\Scripts\\pythonw.exe {}\\disconnect.py",
+            SKIES_DOTA_BOT_AUTOMATIONS_PATH, SKIES_DOTA_BOT_AUTOMATIONS_PATH
+        )),
+        "setup" => format!("cd {} && Scripts\\pythonw.exe SetUp\\set_up_dota.py", SKIES_DOTA_BOT_AUTOMATIONS_PATH),
+        "setup_items" => format!("cd {} && Scripts\\pythonw.exe SetUpItems\\set_up_items.py", SKIES_DOTA_BOT_AUTOMATIONS_PATH),
+        "spoof" => psexec_detach(&format!(
+            "PsExec.exe -s -d -i 1 -h -nobanner -accepteula powershell.exe -NoProfile -ExecutionPolicy Bypass -File {}\\Spoof\\spoof.ps1",
+            SKIES_DOTA_BOT_AUTOMATIONS_PATH
+        )),
         _ => {
             tracing::error!(%command, "The remote command not found");
             exit(1);
@@ -160,16 +202,29 @@ fn get_remote_command(command: &str) -> String {
     }
 }
 
+fn bot_number_from_name(name: &str) -> Option<u16> {
+    let lower = name.to_ascii_lowercase();
+    let pos = lower.find("bot")?;
+    let digits: String = name[pos + 3..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
+}
+
 fn selected_bots_range(automations_config: &AutomationsConfig, args: &Args) -> (u16, u16) {
-    // if no selected bots, use the last bot number
-    let bots_end = args.selected_bots
-        .last().copied()
-        .unwrap_or_else(|| automations_config.bots.len() as u16);
-    // if no selected bots, use the first bot number
-    let bots_start = args.selected_bots
-                    .first().copied()
-                    .unwrap_or(1);
-    //and it means, if the user didn't select any bots, we run the automation on all the bots
+    if args.selected_bots.is_empty() {
+        let numbers: Vec<u16> = automations_config
+            .bots
+            .keys()
+            .filter_map(|name| bot_number_from_name(name))
+            .collect();
+        let bots_start = numbers.iter().copied().min().unwrap_or(1);
+        let bots_end = numbers.iter().copied().max().unwrap_or(1);
+        return (bots_start, bots_end);
+    }
+    let bots_start = *args.selected_bots.first().unwrap();
+    let bots_end = *args.selected_bots.last().unwrap();
     (bots_start, bots_end)
 }
 
@@ -204,82 +259,131 @@ async fn run_stop_script(
         .await
         .expect("Failed to shutdown coordinator connection");
 
+    println!("stop_script sent successfully");
     tracing::info!("stop_script sent successfully");
 }
 
 async fn run_automation(
     automations_config: Arc<AutomationsConfig>,
     args: Arc<Args>,
-    sshpass_args: Arc<Mutex<Vec<String>>>,
     remote_command: Arc<String>,
     update_needed: bool,
+    debug: bool,
 ) {
     let (bots_start, bots_end) = selected_bots_range(&automations_config, &args);
 
     tracing::info!("Running automation on bots from range: {} to {}", bots_start, bots_end);
 
-    let mut bot_number = 1;
     let mut ssh_sessions = Vec::new();
     for (name, ip) in automations_config.bots.iter() {
+        let Some(bot_number) = bot_number_from_name(name) else {
+            tracing::warn!(%name, "Skipping bot (could not parse bot number from name)");
+            continue;
+        };
         if !(bot_number >= bots_start && bot_number <= bots_end) {
-            tracing::info!(%name, "Skipping bot (not in selected range)");
-            bot_number += 1;
+            tracing::info!(%name, %bot_number, "Skipping bot (not in selected range)");
             continue;
         }
 
         let automations_config = Arc::clone(&automations_config);
-        let sshpass_args = Arc::clone(&sshpass_args);
         let remote_command = Arc::clone(&remote_command);
         let ip = ip.clone();
         let name = name.clone();
+        let automation_name = args.automation_name.clone();
         let ssh_session = tokio::spawn(async move {
-            execute_ssh_command(automations_config, sshpass_args, remote_command, update_needed, &name, &ip).await;
+            execute_ssh_command(
+                automations_config,
+                remote_command,
+                update_needed,
+                debug,
+                &automation_name,
+                &name,
+                &ip,
+            )
+            .await
         });
         ssh_sessions.push(ssh_session);
-        bot_number += 1;
     }
 
+    let mut any_failed = false;
     for ssh_session in ssh_sessions {
-        ssh_session.await.unwrap();
+        if !ssh_session.await.unwrap() {
+            any_failed = true;
+        }
+    }
+    if any_failed {
+        exit(1);
     }
 }
 
 async fn execute_ssh_command(
     automations_config: Arc<AutomationsConfig>,
-    sshpass_args: Arc<Mutex<Vec<String>>>,
     remote_command: Arc<String>,
     update_needed: bool,
+    debug: bool,
+    automation_name: &str,
     name: &str,
     ip: &str,
-) {
-    let mut sshpass_args_guard = sshpass_args.lock().await;
-    if let Some(_arg) = sshpass_args_guard.get(2) {
-        sshpass_args_guard[2] = format!("{}@{}", automations_config.username, ip);
-        sshpass_args_guard[3] = get_final_command(update_needed, &*remote_command);
-    }
-    else {
-        sshpass_args_guard.push(format!("{}@{}", automations_config.username, ip));
-        sshpass_args_guard.push(get_final_command(update_needed, &*remote_command));
+) -> bool {
+    // Skip known_hosts entirely — parallel SSH races on ~/.ssh/known_hosts on Windows.
+    let sshpass_args = [
+        format!("-p{}", automations_config.password),
+        String::from("ssh"),
+        String::from("-o"),
+        String::from("StrictHostKeyChecking=no"),
+        String::from("-o"),
+        String::from("UserKnownHostsFile=NUL"),
+        String::from("-o"),
+        String::from("ConnectTimeout=5"),
+        format!("{}@{}", automations_config.username, ip),
+        get_final_command(update_needed, automation_name, &*remote_command),
+    ];
+
+    tracing::info!(%name, %ip, "Connecting...");
+    let output = Command::new("sshpass.exe")
+        .args(&sshpass_args)
+        .output()
+        .await
+        .expect("Failed to execute ssh command");
+
+    let ok = output.status.success();
+    if ok {
+        println!("{name} ({ip}): OK");
+        tracing::info!(%name, %ip, status = %output.status, "OK");
+    } else {
+        println!("{name} ({ip}): FAIL ({})", output.status);
+        tracing::error!(%name, %ip, status = %output.status, "FAIL");
     }
 
-    let output = Command::new("sshpass")
-    .args(&*sshpass_args_guard)
-    .output()
-    .expect("Failed to execute ssh command");
-    tracing::info!(%name, %ip, "DONE: {}", output.status);
-    io::stdout().write_all(&output.stdout).expect("Failed to write stdout to console");
-    io::stderr().write_all(&output.stderr).expect("Failed to write stderr to console");
+    if debug {
+        if !output.stdout.is_empty() {
+            io::stdout().write_all(&output.stdout).expect("Failed to write stdout to console");
+        }
+        if !output.stderr.is_empty() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::warn!(%name, %ip, %stderr, "ssh stderr");
+            io::stderr().write_all(&output.stderr).expect("Failed to write stderr to console");
+        }
+    } else if !output.stderr.is_empty() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        tracing::warn!(%name, %ip, %stderr, "ssh stderr");
+    }
+
+    ok
 }
 
-fn get_final_command(update_needed: bool, remote_command: &str) -> String {
-    if update_needed {
-        format!("{} && {}", get_pull_update_command(), remote_command)
+fn get_final_command(update_needed: bool, automation_name: &str, remote_command: &str) -> String {
+    if !update_needed {
+        return String::from(remote_command);
     }
-    else {
-        String::from(remote_command)
-    }
+    let path = if automation_name == "start" {
+        SKIES_DOTA_PATH
+    } else {
+        SKIES_DOTA_BOT_AUTOMATIONS_PATH
+    };
+    format!("{} && {}", get_pull_update_command(path), remote_command)
 }
 
-fn get_pull_update_command() -> String {
-    String::from("cd C:\\Users\\%USERNAME%\\Desktop\\skies-dota-bot-automations && git fetch && git reset --hard origin/main && git clean -fd")
+fn get_pull_update_command(path: &str) -> String {
+    format!("cd {} && git fetch && git reset --hard origin/main", path)
 }
