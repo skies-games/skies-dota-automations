@@ -1,1 +1,1 @@
-winget install xhcoding.sshpass-win32
+winget install xhcoding.sshpass-win32 --source winget
