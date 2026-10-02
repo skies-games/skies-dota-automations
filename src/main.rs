@@ -325,14 +325,23 @@ async fn execute_ssh_command(
     name: &str,
     ip: &str,
 ) -> bool {
-    // Skip known_hosts entirely — parallel SSH races on ~/.ssh/known_hosts on Windows.
+    // Skip known_hosts entirely — parallel SSH races on ~/.ssh/known_hosts.
+    // Force password auth: Linux OpenSSH tries every ~/.ssh key first and hits
+    // MaxAuthTries ("Too many authentication failures") before sshpass can send
+    // the password from config.toml.
+    let null_device = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    let sshpass_bin = if cfg!(windows) { "sshpass.exe" } else { "sshpass" };
     let sshpass_args = [
         format!("-p{}", automations_config.password),
         String::from("ssh"),
         String::from("-o"),
         String::from("StrictHostKeyChecking=no"),
         String::from("-o"),
-        String::from("UserKnownHostsFile=NUL"),
+        format!("UserKnownHostsFile={null_device}"),
+        String::from("-o"),
+        String::from("PreferredAuthentications=password"),
+        String::from("-o"),
+        String::from("PubkeyAuthentication=no"),
         String::from("-o"),
         String::from("ConnectTimeout=5"),
         format!("{}@{}", automations_config.username, ip),
@@ -340,7 +349,7 @@ async fn execute_ssh_command(
     ];
 
     tracing::info!(%name, %ip, "Connecting...");
-    let output = Command::new("sshpass.exe")
+    let output = Command::new(sshpass_bin)
         .args(&sshpass_args)
         .output()
         .await
