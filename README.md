@@ -55,9 +55,8 @@ OpenTelemetry/Logging is configured to export logs to OpenObserve.
 
 - `-a`, `--automation <name>`: automation name
 - `-b`, `--bots <range>`: optional bot range (`"7"` or `"1-5"`)
-- `-d`, `--data <path>`: parsed but currently not used by the code (kept for future automation payloads)
-
-  Note: in `Config::build()`, `-d` also enables debug logging (`debug = true`). So using `-d/--data` will unintentionally set debug mode.
+- `--data <value>`: extra arg for automations that need one (`set_game_mode`, `set_search_region`)
+- `-d`, `--debug`: enable debug logging (via `Config::build()`)
 
 If `-b/--bots` is omitted, it selects the min..max bot numbers found in `config.toml`.
 
@@ -69,11 +68,21 @@ Supported `-a/--automation` values:
 - `dota_launch`
 - `dota_shutdown`
 - `cancel_game_search`
+- `set_game_mode` — requires `--data all_pick|turbo`
+- `set_search_region` — requires `--data <region>` (`Russia`, `Europe West`, `Europe East`, `Japan`, `SE Asia`, `US East`, `US West`)
 - `disconnect`
 - `setup`
 - `setup_items`
 - `spoof`
+- `install_deps`
 - `stop` (special case: sends a TCP message to coordinator, then exits)
+
+Examples:
+
+```powershell
+cargo run -- -a set_game_mode --data turbo -b 1-3
+cargo run -- -a set_search_region --data "Europe West" -b 7
+```
 
 ## Stop behavior (`-a stop`)
 

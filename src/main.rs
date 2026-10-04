@@ -62,7 +62,10 @@ async fn main() {
     }
 
     let update_needed = check_git_for_updates();
-    let remote_command = Arc::new(get_remote_command(args.automation_name.as_str()));
+    let remote_command = Arc::new(get_remote_command(
+        args.automation_name.as_str(),
+        args.additional_data_path.as_deref(),
+    ));
     run_automation(automations_config, args, remote_command, update_needed, app_config.debug).await;
 }
 
@@ -166,7 +169,7 @@ fn psexec_detach(psexec_cmd: &str) -> String {
     )
 }
 
-fn get_remote_command(command: &str) -> String {
+fn get_remote_command(command: &str, additional_data: Option<&str>) -> String {
     match command {
         "start" => psexec_detach(&format!(
             "PsExec.exe -s -d -i 1 -h -w {} -nobanner -accepteula {}\\Scripts\\python.exe {}\\src\\main.py --debug",
@@ -185,6 +188,26 @@ fn get_remote_command(command: &str) -> String {
             "PsExec.exe -s -d -i 1 -h -w {} -nobanner -accepteula {}\\Scripts\\pythonw.exe {}\\cancel_game_search.py",
             SKIES_DOTA_BOT_AUTOMATIONS_PATH, SKIES_DOTA_BOT_AUTOMATIONS_PATH, SKIES_DOTA_BOT_AUTOMATIONS_PATH
         )),
+        "set_game_mode" => {
+            let Some(game_mode) = additional_data else {
+                tracing::error!("set_game_mode requires --data <all_pick|turbo>");
+                exit(1);
+            };
+            psexec_detach(&format!(
+                "PsExec.exe -s -d -i 1 -h -w {} -nobanner -accepteula {}\\Scripts\\pythonw.exe {}\\set_game_mode.py {}",
+                SKIES_DOTA_BOT_AUTOMATIONS_PATH, SKIES_DOTA_BOT_AUTOMATIONS_PATH, SKIES_DOTA_BOT_AUTOMATIONS_PATH, game_mode
+            ))
+        }
+        "set_search_region" => {
+            let Some(region) = additional_data else {
+                tracing::error!("set_search_region requires --data <region>");
+                exit(1);
+            };
+            psexec_detach(&format!(
+                "PsExec.exe -s -d -i 1 -h -w {} -nobanner -accepteula {}\\Scripts\\pythonw.exe {}\\set_search_region.py \"{}\"",
+                SKIES_DOTA_BOT_AUTOMATIONS_PATH, SKIES_DOTA_BOT_AUTOMATIONS_PATH, SKIES_DOTA_BOT_AUTOMATIONS_PATH, region
+            ))
+        }
         "disconnect" => psexec_detach(&format!(
             "PsExec.exe -s -d -i 1 -h -nobanner -accepteula {}\\Scripts\\pythonw.exe {}\\disconnect.py",
             SKIES_DOTA_BOT_AUTOMATIONS_PATH, SKIES_DOTA_BOT_AUTOMATIONS_PATH
@@ -195,6 +218,11 @@ fn get_remote_command(command: &str) -> String {
             "PsExec.exe -s -d -i 1 -h -nobanner -accepteula powershell.exe -NoProfile -ExecutionPolicy Bypass -File {}\\Spoof\\spoof.ps1",
             SKIES_DOTA_BOT_AUTOMATIONS_PATH
         )),
+        // Use venv python directly (same as "start") — activate.bat is unreliable over non-interactive SSH.
+        "install_deps" => format!(
+            "cd {} && Scripts\\python.exe -m pip install -r requirements.txt",
+            SKIES_DOTA_PATH
+        ),
         _ => {
             tracing::error!(%command, "The remote command not found");
             exit(1);
@@ -385,12 +413,13 @@ fn get_final_command(update_needed: bool, automation_name: &str, remote_command:
     if !update_needed {
         return String::from(remote_command);
     }
-    let path = if automation_name == "start" {
+    let path = if automation_name == "start" || automation_name == "install_deps" {
         SKIES_DOTA_PATH
     } else {
         SKIES_DOTA_BOT_AUTOMATIONS_PATH
     };
-    format!("{} && {}", get_pull_update_command(path), remote_command)
+    //or use & instead of && if you don't want to block on a failed update from git
+    format!("{} && {}", get_pull_update_command(path), remote_command) 
 }
 
 fn get_pull_update_command(path: &str) -> String {
