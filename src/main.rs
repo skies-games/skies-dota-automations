@@ -120,16 +120,36 @@ fn parse_args() -> Args {
     args_struct
 }
 
+/// Parse `-b` specs: `7`, `1-5`, `1,2,3,5`, or mixed `1-3,5,8`.
 fn parse_range(range: &str) -> Vec<u16> {
-    let range_parts = range.split('-').collect::<Vec<&str>>();
-    if range_parts.len() == 1 {
-        return vec![range_parts[0].parse::<u16>().expect("Failed to parse range")];
+    let mut bots = Vec::new();
+    for part in range.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some((start_s, end_s)) = part.split_once('-') {
+            let start: u16 = start_s
+                .trim()
+                .parse()
+                .unwrap_or_else(|_| panic!("Failed to parse bot range start in '{part}'"));
+            let end: u16 = end_s
+                .trim()
+                .parse()
+                .unwrap_or_else(|_| panic!("Failed to parse bot range end in '{part}'"));
+            if start > end {
+                panic!("Invalid bot range '{part}': start > end");
+            }
+            bots.extend(start..=end);
+        } else {
+            bots.push(
+                part.parse()
+                    .unwrap_or_else(|_| panic!("Failed to parse bot number '{part}'")),
+            );
+        }
     }
-    else {
-        let start = range_parts[0].parse::<u16>().expect("Failed to parse range");
-        let end = range_parts[1].parse::<u16>().expect("Failed to parse range");
-        (start..=end).collect()
+    bots.sort_unstable();
+    bots.dedup();
+    if bots.is_empty() {
+        panic!("No bots parsed from '{range}'");
     }
+    bots
 }
 
 fn check_git_for_updates() -> bool {
@@ -249,20 +269,18 @@ fn bot_number_from_name(name: &str) -> Option<u16> {
     digits.parse().ok()
 }
 
-fn selected_bots_range(automations_config: &AutomationsConfig, args: &Args) -> (u16, u16) {
-    if args.selected_bots.is_empty() {
-        let numbers: Vec<u16> = automations_config
-            .bots
-            .keys()
-            .filter_map(|name| bot_number_from_name(name))
-            .collect();
-        let bots_start = numbers.iter().copied().min().unwrap_or(1);
-        let bots_end = numbers.iter().copied().max().unwrap_or(1);
-        return (bots_start, bots_end);
+fn selected_bot_numbers(automations_config: &AutomationsConfig, args: &Args) -> Vec<u16> {
+    if !args.selected_bots.is_empty() {
+        return args.selected_bots.clone();
     }
-    let bots_start = *args.selected_bots.first().unwrap();
-    let bots_end = *args.selected_bots.last().unwrap();
-    (bots_start, bots_end)
+    let mut numbers: Vec<u16> = automations_config
+        .bots
+        .keys()
+        .filter_map(|name| bot_number_from_name(name))
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    numbers
 }
 
 async fn run_stop_script(
@@ -270,10 +288,10 @@ async fn run_stop_script(
     automations_config: &AutomationsConfig,
     args: &Args,
 ) {
-    let (bots_start, bots_end) = selected_bots_range(automations_config, args);
-    let affected_bots: Vec<String> = (bots_start..=bots_end).map(|n| n.to_string()).collect();
+    let selected = selected_bot_numbers(automations_config, args);
+    let affected_bots: Vec<String> = selected.iter().map(|n| n.to_string()).collect();
     let message = format!("10:{}", affected_bots.join(","));
-    tracing::info!(%message, "Sending stop_script user command to coordinator for bots {}-{}", bots_start, bots_end);
+    tracing::info!(%message, "Sending stop_script user command to coordinator for bots {:?}", selected);
 
     let mut stream = TcpStream::connect((
         app_config.coordinator_server_ip.as_str(),
@@ -307,9 +325,9 @@ async fn run_automation(
     update_needed: bool,
     debug: bool,
 ) {
-    let (bots_start, bots_end) = selected_bots_range(&automations_config, &args);
+    let selected = selected_bot_numbers(&automations_config, &args);
 
-    tracing::info!("Running automation on bots from range: {} to {}", bots_start, bots_end);
+    tracing::info!("Running automation on bots: {:?}", selected);
 
     let mut ssh_sessions = Vec::new();
     for (name, ip) in automations_config.bots.iter() {
@@ -317,8 +335,8 @@ async fn run_automation(
             tracing::warn!(%name, "Skipping bot (could not parse bot number from name)");
             continue;
         };
-        if !(bot_number >= bots_start && bot_number <= bots_end) {
-            tracing::info!(%name, %bot_number, "Skipping bot (not in selected range)");
+        if !selected.contains(&bot_number) {
+            tracing::info!(%name, %bot_number, "Skipping bot (not in selected list)");
             continue;
         }
 

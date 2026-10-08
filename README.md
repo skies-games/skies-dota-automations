@@ -54,7 +54,7 @@ OpenTelemetry/Logging is configured to export logs to OpenObserve.
 ### Common flags
 
 - `-a`, `--automation <name>`: automation name
-- `-b`, `--bots <range>`: optional bot range (`"7"` or `"1-5"`)
+- `-b`, `--bots <spec>`: optional bots — `"7"`, `"1-5"`, `"1,2,3,5"`, or mixed `"1-3,5,8"`
 - `--data <value>`: extra arg for automations that need one (`set_game_mode`, `set_search_region`)
 - `-d`, `--debug`: enable debug logging (via `Config::build()`)
 
