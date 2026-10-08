@@ -223,6 +223,15 @@ fn get_remote_command(command: &str, additional_data: Option<&str>) -> String {
             "cd {} && Scripts\\python.exe -m pip install -r requirements.txt",
             SKIES_DOTA_PATH
         ),
+        // VPN host scripts live in skies-dota-bot-automations\\vpn
+        "vpn_status" => format!(
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -File {}\\vpn\\vpn_status.ps1",
+            SKIES_DOTA_BOT_AUTOMATIONS_PATH
+        ),
+        "vpn_install_startup_tasks" => format!(
+            "PsExec.exe -s -h -nobanner -accepteula powershell.exe -NoProfile -ExecutionPolicy Bypass -File {}\\vpn\\vpn_install_startup_tasks_admin.ps1",
+            SKIES_DOTA_BOT_AUTOMATIONS_PATH
+        ),
         _ => {
             tracing::error!(%command, "The remote command not found");
             exit(1);
