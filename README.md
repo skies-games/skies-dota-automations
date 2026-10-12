@@ -75,12 +75,18 @@ Supported `-a/--automation` values:
 - `setup_items`
 - `spoof`
 - `install_deps`
-- `vpn_status` — vpverst process + TUN `/1` catchalls
-- `vpn_install_startup_tasks` — Vpverst + ping keepalive scheduled tasks
+- `vpn_setup` — watchdog + ping keepalive + firewall killswitch (VPN peer `/32` auto-detected per bot)
+- `vpn_teardown` — KS off, remove tasks, stop vpverst
+- `vpn_status` — tasks / process / TUN `/1` / KS
 - `stop` (special case: sends a TCP message to coordinator, then exits)
 
-VPN automations SSH into **`skies-dota-bot-automations\vpn\`** only (never `skies-dota-windows-automations`).
-A matching copy of those scripts also lives in `windows-automations\powershell\` for manual host setup.
+VPN scripts: `skies-dota-bot-automations\vpn\` (mirrored in `windows-automations\powershell\`).
+
+```powershell
+cargo run -- -a vpn_setup -b 1,2,3
+cargo run -- -a vpn_status -b 1,2,3
+cargo run -- -a vpn_teardown -b 1
+```
 
 Examples:
 

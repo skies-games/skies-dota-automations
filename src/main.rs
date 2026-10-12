@@ -248,8 +248,12 @@ fn get_remote_command(command: &str, additional_data: Option<&str>) -> String {
             "powershell.exe -NoProfile -ExecutionPolicy Bypass -File {}\\vpn\\vpn_status.ps1",
             SKIES_DOTA_BOT_AUTOMATIONS_PATH
         ),
-        "vpn_install_startup_tasks" => format!(
-            "PsExec.exe -s -h -nobanner -accepteula powershell.exe -NoProfile -ExecutionPolicy Bypass -File {}\\vpn\\vpn_install_startup_tasks_admin.ps1",
+        "vpn_setup" => format!(
+            "PsExec.exe -s -h -nobanner -accepteula powershell.exe -NoProfile -ExecutionPolicy Bypass -File {}\\vpn\\vpn_setup_admin.ps1",
+            SKIES_DOTA_BOT_AUTOMATIONS_PATH
+        ),
+        "vpn_teardown" => format!(
+            "PsExec.exe -s -h -nobanner -accepteula powershell.exe -NoProfile -ExecutionPolicy Bypass -File {}\\vpn\\vpn_teardown_admin.ps1",
             SKIES_DOTA_BOT_AUTOMATIONS_PATH
         ),
         _ => {
