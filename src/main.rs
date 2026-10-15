@@ -450,7 +450,7 @@ fn get_final_command(update_needed: bool, automation_name: &str, remote_command:
         SKIES_DOTA_BOT_AUTOMATIONS_PATH
     };
     //or use & instead of && if you don't want to block on a failed update from git
-    format!("{} && {}", get_pull_update_command(path), remote_command) 
+    format!("{} & {}", get_pull_update_command(path), remote_command) 
 }
 
 fn get_pull_update_command(path: &str) -> String {
